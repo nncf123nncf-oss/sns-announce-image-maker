@@ -175,7 +175,7 @@
   ];
 
   var BLACK = "#111111";
-  var PANEL = "#FFFFFF";
+  var FRAME_COLOR = "#FFFFFF";   // 白枠（社長指示。淡い背景では細い線として見える）
 
   var SIZE = 1080;
   var CHARS_PER_LINE = 12;
@@ -183,16 +183,19 @@
   var MAX_META_CHARS = 20;
 
   var MSG_FONT = 64;
-  var LINE_HEIGHT = 84;
-  var MSG_CENTER_Y = 350;
+  var LINE_HEIGHT = 96;      // 行間を広めに取り、窮屈に見せない
+  var MSG_CENTER_Y = 380;    // 告知文は上〜中央付近。1行でも6行でもこの中心で揃える
 
-  var FRAME_INSET = 40;
-  var FRAME_WIDTH = 3;
+  var FRAME_INSET = 56;      // 外周から十分に余白を取った白枠（1本のみ）
+  var FRAME_WIDTH = 4;
 
-  var PANEL_X0 = 90, PANEL_Y0 = 640, PANEL_X1 = 990, PANEL_Y1 = 950, PANEL_RADIUS = 24;
-  var DATE_FONT = 56, DATE_Y = 750;
-  var SHOP_FONT = 48, SHOP_Y = 855;
-  var PANEL_PADDING = 40;
+  var RULE_Y = 720;          // 告知文と日付の間の細い横線（1本のみ）
+  var RULE_HALF_WIDTH = 260;
+  var RULE_WIDTH = 2;
+
+  var DATE_FONT = 56, DATE_Y = 812;
+  var SHOP_FONT = 48, SHOP_Y = 908;
+  var TEXT_MARGIN = 40;      // 白枠の内側にさらに取る左右の余白
   var MIN_META_FONT = 28;
 
   var canvas = document.getElementById("canvas");
@@ -223,6 +226,9 @@
     for (var p = 0; p < paragraphs.length && lines.length <= MAX_LINES; p++) {
       var chars = toChars(paragraphs[p]);
       if (chars.length === 0) {
+        // 末尾の空行は行数に数えない（最後にEnterを1回押しただけで
+        // 6行目が「…」に化ける不具合を防ぐ）
+        if (p === paragraphs.length - 1) { continue; }
         lines.push("");
         continue;
       }
@@ -243,9 +249,11 @@
     return chars.length > MAX_META_CHARS ? chars.slice(0, MAX_META_CHARS).join("") : chars.join("");
   }
 
-  // 白パネルの内側（左右に40pxずつ余白）に収まるまで文字サイズを下げる
+  // 白枠の内側（さらに左右40pxの余白）に収まるまで文字サイズを下げる。
+  // 注意: 計測のため ctx.font を書き換えるが、最後に元へ戻す。戻り値を ctx.font に代入して使うこと。
   function fitFont(text, baseSize, bold) {
-    var maxWidth = (PANEL_X1 - PANEL_X0) - PANEL_PADDING * 2;
+    var maxWidth = SIZE - (FRAME_INSET + TEXT_MARGIN) * 2;
+    var saved = ctx.font;
     var size = baseSize;
     var face = "px system-ui, -apple-system, 'Segoe UI', sans-serif";
     while (size > MIN_META_FONT) {
@@ -253,30 +261,19 @@
       if (ctx.measureText(text).width <= maxWidth) { break; }
       size -= 2;
     }
+    ctx.font = saved;
     return (bold ? "bold " : "") + size + face;
-  }
-
-  function roundRect(x0, y0, x1, y1, r) {
-    ctx.beginPath();
-    ctx.moveTo(x0 + r, y0);
-    ctx.lineTo(x1 - r, y0);
-    ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
-    ctx.lineTo(x1, y1 - r);
-    ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
-    ctx.lineTo(x0 + r, y1);
-    ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
-    ctx.lineTo(x0, y0 + r);
-    ctx.quadraticCurveTo(x0, y0, x0 + r, y0);
-    ctx.closePath();
   }
 
   function draw() {
     var ink = inkColor();
 
-    // 1層目: 選んだ色のベタ塗り＋細い枠線
+    // 背景: 選んだ淡い色のベタ塗り
     ctx.fillStyle = current().bg;
     ctx.fillRect(0, 0, SIZE, SIZE);
-    ctx.strokeStyle = ink;
+
+    // 外周から余白を取った細い白枠（1本だけ）
+    ctx.strokeStyle = FRAME_COLOR;
     ctx.lineWidth = FRAME_WIDTH;
     ctx.strokeRect(FRAME_INSET, FRAME_INSET,
                    SIZE - FRAME_INSET * 2, SIZE - FRAME_INSET * 2);
@@ -284,7 +281,7 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // 見出し（告知文）は色ベタの上に置く
+    // 告知文: 上〜中央付近。行数が変わっても中心を固定して balance を保つ
     var lines = wrapLines(messageEl.value);
     var blockTop = MSG_CENTER_Y - ((lines.length - 1) * LINE_HEIGHT) / 2;
     ctx.fillStyle = ink;
@@ -293,12 +290,12 @@
       ctx.fillText(lines[i], SIZE / 2, blockTop + i * LINE_HEIGHT);
     }
 
-    // 2層目: 白いパネル。日付と店名はこの上に置く
-    roundRect(PANEL_X0, PANEL_Y0, PANEL_X1, PANEL_Y1, PANEL_RADIUS);
-    ctx.fillStyle = PANEL;
-    ctx.fill();
+    // 告知文と日付の間の細い横線（1本だけ）
     ctx.strokeStyle = ink;
-    ctx.lineWidth = FRAME_WIDTH;
+    ctx.lineWidth = RULE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(SIZE / 2 - RULE_HALF_WIDTH, RULE_Y);
+    ctx.lineTo(SIZE / 2 + RULE_HALF_WIDTH, RULE_Y);
     ctx.stroke();
 
     var dateText = clampMeta(dateEl.value);
