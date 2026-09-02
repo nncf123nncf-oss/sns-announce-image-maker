@@ -148,8 +148,8 @@
   <div class="field">
     <span class="group-label" id="fg-label">文字色</span>
     <div class="toggle" id="toggle" role="group" aria-labelledby="fg-label">
-      <button type="button" data-color="#FFFFFF" aria-pressed="true"><span class="chip" style="background:#FFFFFF"></span>白</button>
-      <button type="button" data-color="#111111" aria-pressed="false"><span class="chip" style="background:#111111"></span>黒</button>
+      <button type="button" data-mode="tone" aria-pressed="true"><span class="chip" id="chip-tone"></span>色に合わせた濃い色</button>
+      <button type="button" data-mode="black" aria-pressed="false"><span class="chip" style="background:#111111"></span>黒</button>
     </div>
   </div>
 
@@ -164,24 +164,36 @@
 (function () {
   "use strict";
 
+  // 背景はペールトーン。文字は同じ色相の濃い色を組にする
+  // （ペール背景に白文字はコントラスト1.2前後で読めないため、白は文字色に使わない）
   var BG_COLORS = [
-    { hex: "#E85D4C", name: "テラコッタ赤" },
-    { hex: "#2F6B5C", name: "深緑" },
-    { hex: "#3E5C8C", name: "紺" },
-    { hex: "#F2A93C", name: "マスタード黄" },
-    { hex: "#2A2A2E", name: "ほぼ黒" }
+    { bg: "#F7DAD3", ink: "#8C3A2A", name: "ペールコーラル" },
+    { bg: "#DCEBDF", ink: "#2E5D40", name: "ペールセージ" },
+    { bg: "#DAE4F2", ink: "#2C4470", name: "ペールブルー" },
+    { bg: "#F7ECCF", ink: "#7A5A1E", name: "ペールイエロー" },
+    { bg: "#E4E4E6", ink: "#33343A", name: "ペールグレー" }
   ];
+
+  var BLACK = "#111111";
+  var PANEL = "#FFFFFF";
 
   var SIZE = 1080;
   var CHARS_PER_LINE = 12;
   var MAX_LINES = 6;
   var MAX_META_CHARS = 20;
+
   var MSG_FONT = 64;
-  var META_FONT = 48;
-  var LINE_HEIGHT = 90;
-  var MSG_CENTER_Y = 440;
-  var DATE_Y = 880;
-  var SHOP_Y = 960;
+  var LINE_HEIGHT = 84;
+  var MSG_CENTER_Y = 350;
+
+  var FRAME_INSET = 40;
+  var FRAME_WIDTH = 3;
+
+  var PANEL_X0 = 90, PANEL_Y0 = 640, PANEL_X1 = 990, PANEL_Y1 = 950, PANEL_RADIUS = 24;
+  var DATE_FONT = 56, DATE_Y = 750;
+  var SHOP_FONT = 44, SHOP_Y = 855;
+  var PANEL_PADDING = 40;
+  var MIN_META_FONT = 28;
 
   var canvas = document.getElementById("canvas");
   var ctx = canvas.getContext("2d");
@@ -190,10 +202,14 @@
   var shopEl = document.getElementById("shop");
   var swatchesEl = document.getElementById("swatches");
   var toggleEl = document.getElementById("toggle");
+  var chipTone = document.getElementById("chip-tone");
   var downloadEl = document.getElementById("download");
   var errorEl = document.getElementById("error");
 
-  var state = { bg: BG_COLORS[0].hex, fg: "#FFFFFF" };
+  var state = { index: 0, mode: "tone" };
+
+  function current() { return BG_COLORS[state.index]; }
+  function inkColor() { return state.mode === "black" ? BLACK : current().ink; }
 
   // 絵文字などのサロゲートペアを分断しないよう、コードポイント単位の配列にする
   function toChars(text) {
@@ -227,42 +243,89 @@
     return chars.length > MAX_META_CHARS ? chars.slice(0, MAX_META_CHARS).join("") : chars.join("");
   }
 
-  function draw() {
-    ctx.fillStyle = state.bg;
-    ctx.fillRect(0, 0, SIZE, SIZE);
+  // 白パネルの内側（左右に40pxずつ余白）に収まるまで文字サイズを下げる
+  function fitFont(text, baseSize, bold) {
+    var maxWidth = (PANEL_X1 - PANEL_X0) - PANEL_PADDING * 2;
+    var size = baseSize;
+    var face = "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    while (size > MIN_META_FONT) {
+      ctx.font = (bold ? "bold " : "") + size + face;
+      if (ctx.measureText(text).width <= maxWidth) { break; }
+      size -= 2;
+    }
+    return (bold ? "bold " : "") + size + face;
+  }
 
-    ctx.fillStyle = state.fg;
+  function roundRect(x0, y0, x1, y1, r) {
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.lineTo(x1 - r, y0);
+    ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+    ctx.lineTo(x1, y1 - r);
+    ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
+    ctx.lineTo(x0 + r, y1);
+    ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+    ctx.lineTo(x0, y0 + r);
+    ctx.quadraticCurveTo(x0, y0, x0 + r, y0);
+    ctx.closePath();
+  }
+
+  function draw() {
+    var ink = inkColor();
+
+    // 1層目: 選んだ色のベタ塗り＋細い枠線
+    ctx.fillStyle = current().bg;
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = FRAME_WIDTH;
+    ctx.strokeRect(FRAME_INSET, FRAME_INSET,
+                   SIZE - FRAME_INSET * 2, SIZE - FRAME_INSET * 2);
+
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
+    // 見出し（告知文）は色ベタの上に置く
     var lines = wrapLines(messageEl.value);
     var blockTop = MSG_CENTER_Y - ((lines.length - 1) * LINE_HEIGHT) / 2;
+    ctx.fillStyle = ink;
     ctx.font = "bold " + MSG_FONT + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
     for (var i = 0; i < lines.length; i++) {
       ctx.fillText(lines[i], SIZE / 2, blockTop + i * LINE_HEIGHT);
     }
 
-    ctx.font = META_FONT + "px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    // 2層目: 白いパネル。日付と店名はこの上に置く
+    roundRect(PANEL_X0, PANEL_Y0, PANEL_X1, PANEL_Y1, PANEL_RADIUS);
+    ctx.fillStyle = PANEL;
+    ctx.fill();
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = FRAME_WIDTH;
+    ctx.stroke();
+
     var dateText = clampMeta(dateEl.value);
     var shopText = clampMeta(shopEl.value);
+    ctx.fillStyle = ink;
+    ctx.font = fitFont(dateText, DATE_FONT, true);
     ctx.fillText(dateText, SIZE / 2, DATE_Y);
+    ctx.font = fitFont(shopText, SHOP_FONT, false);
     ctx.fillText(shopText, SIZE / 2, SHOP_Y);
 
     canvas.setAttribute("aria-label",
       "告知画像のプレビュー: " + lines.join(" ") + " " + dateText + " " + shopText);
+
+    chipTone.style.background = current().ink;
   }
 
   function buildSwatches() {
     for (var i = 0; i < BG_COLORS.length; i++) {
-      (function (color) {
+      (function (color, index) {
         var b = document.createElement("button");
         b.type = "button";
         b.className = "swatch";
-        b.style.background = color.hex;
+        b.style.background = color.bg;
         b.setAttribute("aria-label", color.name);
-        b.setAttribute("aria-pressed", color.hex === state.bg ? "true" : "false");
+        b.setAttribute("aria-pressed", index === state.index ? "true" : "false");
         b.addEventListener("click", function () {
-          state.bg = color.hex;
+          state.index = index;
           var all = swatchesEl.querySelectorAll(".swatch");
           for (var j = 0; j < all.length; j++) {
             all[j].setAttribute("aria-pressed", all[j] === b ? "true" : "false");
@@ -270,15 +333,15 @@
           draw();
         });
         swatchesEl.appendChild(b);
-      })(BG_COLORS[i]);
+      })(BG_COLORS[i], i);
     }
   }
 
   toggleEl.addEventListener("click", function (e) {
-    var btn = e.target.closest ? e.target.closest("button[data-color]") : null;
+    var btn = e.target.closest ? e.target.closest("button[data-mode]") : null;
     if (!btn) { return; }
-    state.fg = btn.getAttribute("data-color");
-    var all = toggleEl.querySelectorAll("button[data-color]");
+    state.mode = btn.getAttribute("data-mode");
+    var all = toggleEl.querySelectorAll("button[data-mode]");
     for (var j = 0; j < all.length; j++) {
       all[j].setAttribute("aria-pressed", all[j] === btn ? "true" : "false");
     }
